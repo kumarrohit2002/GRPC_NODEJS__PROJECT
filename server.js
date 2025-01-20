@@ -1,45 +1,59 @@
-// server.js
-const PROTO_PATH = './proto/user.proto';
 import grpc from '@grpc/grpc-js';
 import protoLoader from '@grpc/proto-loader';
+import mongoose from 'mongoose';
+import User from './models/User.model.js';
 
-const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
-    keepCase: true,
-    longs: String,
-    enums: String,
-    arrays: true,
-});
-
-const userProto = grpc.loadPackageDefinition(packageDefinition).UserService;
-const server = new grpc.Server();
-
-const users = [{ name: 'Rohit Kumar', email: 'rohit@gmail.com', age: 12 },];
-
-
-server.addService(userProto.service, {
-    getUser: (_, callback) => {
-        console.log('getUser called');
-        callback(null, { users });
-    },
-    addUser: (call, callback) => {
-        console.log('addUser called with:', call.request);
-        const user = call.request;
-        users.push(user);
-        callback(null, user);
-    },
-});
-
-
+const PROTO_PATH = './proto/user.proto';
+const MONGO_URI = 'mongodb://localhost:27017/grpc_demo';
 const PORT = 30043;
 
-server.bindAsync(
-    '127.0.0.1:30043',
-    grpc.ServerCredentials.createInsecure(),
-    (err) => {
-        if (err) {
-            console.error('Server error:', err);
-            return;
-        }
-        console.log(`gRPC server is running on 127.0.0.1:${PORT}`);
+// MongoDB Connection
+mongoose
+  .connect(MONGO_URI)
+  .then(() => console.log('Connected to MongoDB'))
+  .catch((err) => console.error('MongoDB connection error:', err));
+
+// Load gRPC Service Definitions
+const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
+  keepCase: true,
+  longs: String,
+  enums: String,
+  arrays: true,
+});
+const userProto = grpc.loadPackageDefinition(packageDefinition).UserService;
+
+const server = new grpc.Server();
+
+// Define gRPC Methods
+server.addService(userProto.service, {
+  getUser: async (_, callback) => {
+    try {
+      const users = await User.find(); // Fetch all users from MongoDB
+      callback(null, { users });
+    } catch (err) {
+      callback(err, null);
     }
+  },
+  addUser: async (call, callback) => {
+    try {
+      const user = new User(call.request); // Create and save the user
+      await user.save();
+      callback(null, { user, message: 'Added user successfully' });
+    } catch (err) {
+      callback(err, null);
+    }
+  },
+});
+
+// Start gRPC Server
+server.bindAsync(
+  `127.0.0.1:${PORT}`,
+  grpc.ServerCredentials.createInsecure(),
+  (err) => {
+    if (err) {
+      console.error('Server error:', err);
+      return;
+    }
+    console.log(`gRPC server is running on 127.0.0.1:${PORT}`);
+  }
 );
