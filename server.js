@@ -2,14 +2,18 @@ import grpc from '@grpc/grpc-js';
 import protoLoader from '@grpc/proto-loader';
 import mongoose from 'mongoose';
 import User from './models/User.model.js';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const PROTO_PATH = './proto/user.proto';
-const MONGO_URI = 'mongodb://localhost:27017/grpc_demo';
-const PORT = 30043;
+const MONGO_URI = process.env.MONGO_URI;
+const GRPC_PORT = process.env.GRPC_PORT || '30043';
 
 // MongoDB Connection
 mongoose
-  .connect(MONGO_URI)
+  .connect(MONGO_URI, {})
   .then(() => console.log('Connected to MongoDB'))
   .catch((err) => console.error('MongoDB connection error:', err));
 
@@ -22,38 +26,41 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 });
 const userProto = grpc.loadPackageDefinition(packageDefinition).UserService;
 
-const server = new grpc.Server();
+// Function to start gRPC server
+export function startGrpcServer() {
+  const server = new grpc.Server();
 
-// Define gRPC Methods
-server.addService(userProto.service, {
-  getUser: async (_, callback) => {
-    try {
-      const users = await User.find(); // Fetch all users from MongoDB
-      callback(null, { users });
-    } catch (err) {
-      callback(err, null);
-    }
-  },
-  addUser: async (call, callback) => {
-    try {
-      const user = new User(call.request); // Create and save the user
-      await user.save();
-      callback(null, { user, message: 'Added user successfully' });
-    } catch (err) {
-      callback(err, null);
-    }
-  },
-});
+  // Define gRPC Methods
+  server.addService(userProto.service, {
+    getUser: async (_, callback) => {
+      try {
+        const users = await User.find();
+        callback(null, { users });
+      } catch (err) {
+        callback({ code: grpc.status.INTERNAL, message: err.message }, null);
+      }
+    },
+    addUser: async (call, callback) => {
+      try {
+        const user = new User(call.request);
+        await user.save();
+        callback(null, { message: 'User added successfully.' });
+      } catch (err) {
+        callback({ code: grpc.status.INTERNAL, message: err.message }, null);
+      }
+    },
+  });
 
-// Start gRPC Server
-server.bindAsync(
-  `127.0.0.1:${PORT}`,
-  grpc.ServerCredentials.createInsecure(),
-  (err) => {
-    if (err) {
-      console.error('Server error:', err);
-      return;
+  // Start gRPC server
+  server.bindAsync(
+    `0.0.0.0:${GRPC_PORT}`,
+    grpc.ServerCredentials.createInsecure(),
+    (err, port) => {
+      if (err) {
+        console.error('Failed to start gRPC server:', err);
+        return;
+      }
+      console.log(`gRPC server running on port ${port}`);
     }
-    console.log(`gRPC server is running on 127.0.0.1:${PORT}`);
-  }
-);
+  );
+}
